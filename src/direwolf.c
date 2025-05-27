@@ -1384,16 +1384,22 @@ void app_process_rec_packet (int chan, int subchan, int slice, packet_t pp, alev
 	  }
 	  else {
 	    text_color_set(DW_COLOR_DECODED);
-            if (is_fx25) {  // really means 'FEC enabled'
-              if (audio_config.achan[0].layer2_xmit == LAYER2_FX25) {
-                dw_printf("[FX.25] ");
-              } else {
-                dw_printf("[IL2P] ");
-              }
-	    } else {
-              dw_printf("[AX.25] ");
+            switch (fec_type) {
+              case fec_type_none:
+	        dw_printf("[AX.25] ");
+	 	break;
+	      case fec_type_fx25:
+		dw_printf("[FX.25] ");
+		break;
+	      case fec_type_il2p:
+		dw_printf("[IL2P] ");
+		break;
+	      default:
+		text_color_set(DW_COLOR_ERROR);
+		dw_printf("[Unknown FEC type %d] ", fec_type);
+		break;
 	    }
-	  }
+          }
 
 	  if (audio_config.achan[chan].num_subchan > 1 && audio_config.achan[chan].num_slicers == 1) {
 	    dw_printf ("[%d.%d%s] ", chan, subchan, ts);
