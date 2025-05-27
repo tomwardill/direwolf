@@ -537,6 +537,7 @@ void kiss_process_msg (unsigned char *kiss_msg, int kiss_len, int debug, struct 
 	int chan;
 	int cmd;
 	alevel_t alevel;
+	unsigned short ACK = 0;
 
 // New in 1.7:
 // We can have KISS TCP ports which convey only a single radio channel.
@@ -555,6 +556,7 @@ void kiss_process_msg (unsigned char *kiss_msg, int kiss_len, int debug, struct 
 	switch (cmd) 
 	{
 	  case KISS_CMD_DATA_FRAME:				/* 0 = Data Frame */
+	  case XKISS_CMD_DATA:                  // BPQ KISS ACKMODE Frame
 
 	    // kissnet_copy clobbers first byte but we don't care
 	    // because we have already determined channel and command.
@@ -630,6 +632,16 @@ void kiss_process_msg (unsigned char *kiss_msg, int kiss_len, int debug, struct 
 	      return;
 	    }
 
+                        // ackmode check
+ 
+                if (cmd == XKISS_CMD_DATA)                      // ackmode
+                {
+                        // ACK data is first two bytes of frame. Extrack and remove from frame_data
+ 
+                        memcpy(&ACK, kiss_msg+1, 2);
+                        kiss_len -= 2;
+                        memmove(kiss_msg+1, kiss_msg+3, kiss_len-1);
+                }
 	    memset (&alevel, 0xff, sizeof(alevel));
 	    packet_t pp = ax25_from_frame (kiss_msg+1, kiss_len-1, alevel);
 	    if (pp == NULL) {
@@ -643,6 +655,11 @@ void kiss_process_msg (unsigned char *kiss_msg, int kiss_len, int debug, struct 
 	      /* that digipeater has been used, it should go out quickly thru */
 	      /* the high priority queue. */
 	      /* Otherwise, it is an original for the low priority queue. */
+
+                        pp->KISSCMD = cmd;
+                        pp->ACK = ACK;
+                        pp->Client = client;
+			pp->KPS = kps;
 
 	      if (ax25_get_num_repeaters(pp) >= 1 &&
 	      		ax25_get_h(pp,AX25_REPEATER_1)) {
@@ -944,7 +961,7 @@ void kiss_debug_print (fromto_t fromto, char *special, unsigned char *pmsg, int 
 		"Data frame",	"TXDELAY",	"P",		"SlotTime",
 		"TXtail",	"FullDuplex",	"SetHardware",	"Invalid 7",
 		"Invalid 8", 	"Invalid 9",	"Invalid 10",	"Invalid 11",
-		"Invalid 12", 	"Invalid 13",	"Invalid 14",	"Return" };
+		"ACKMode", 	"Invalid 13",	"Invalid 14",	"Return" };
 #endif
 
 	text_color_set(DW_COLOR_DEBUG);

@@ -119,6 +119,7 @@ void kiss_process_msg (unsigned char *kiss_msg, int kiss_len, int debug, struct 
 
 void kiss_debug_print (fromto_t fromto, char *special, unsigned char *pmsg, int msg_len);
 
+void kissnet_raw_send(int Client, unsigned char * ACK, int acklen, struct kissport_status_s *kps);
 
 #endif  // KISS_FRAME_H
 

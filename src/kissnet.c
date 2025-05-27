@@ -785,6 +785,35 @@ void kissnet_send_rec_packet (int chan, int kiss_cmd, unsigned char *fbuf, int f
 	
 } /* end kissnet_send_rec_packet */
 
+void kissnet_raw_send(int Client, unsigned char * ACK, int acklen, struct kissport_status_s *kps)
+{
+        int err;
+        
+        if (kiss_debug) {
+                kiss_debug_print (1, NULL, ACK, acklen);
+        	text_color_set(DW_COLOR_ERROR);
+        	dw_printf ("\nSENDING RAW PACKET TO CLIENT %d ON SOCKET %d CHANNEL %d PORT %d.\n\n",Client,kps->client_sock[Client],kps->chan,kps->tcp_port);
+	}
+#if __WIN32__
+                    err = SOCK_SEND(kps->client_sock[Client], (char*)ACK, acklen, 0);
+	            if (err == SOCKET_ERROR) {
+	              text_color_set(DW_COLOR_ERROR);
+                      dw_printf ("\nError %d sending message to KISS client application.  Closing connection.\n\n", WSAGetLastError());
+	              closesocket (kps->client_sock[Client]);
+	              kps->client_sock[Client] = -1;
+	              WSACleanup();
+	            }
+#else
+                    err = SOCK_SEND (kps->client_sock[Client], (char*)ACK, acklen);
+	            if (err <= 0) {
+                      perror("kissnet_raw_send");
+	              text_color_set(DW_COLOR_ERROR);
+                      dw_printf ("\nError sending message to KISS client application.  Closing connection.\n\n");
+	              close (kps->client_sock[Client]);
+	              kps->client_sock[Client] = -1;
+	            }
+#endif
+}
 
 /*-------------------------------------------------------------------
  *

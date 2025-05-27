@@ -2008,6 +2008,8 @@ void ax25_format_addrs (packet_t this_p, char *result)
 	ax25_get_addr_with_ssid (this_p, AX25_DESTINATION, stemp);
 	strcat (result, stemp);
 
+	printf("%s\n", result);
+
 	heard = ax25_get_heard(this_p);
 
 	for (i=(int)AX25_REPEATER_1; i<this_p->num_addr; i++) {
@@ -2412,8 +2414,6 @@ void ax25_hex_dump (packet_t this_p)
 
 	  snprintf (l_text, sizeof(l_text), ", length = %d", flen);
 	  strlcat (cp_text, l_text, sizeof(cp_text));
-
-	  dw_printf ("%s\n", cp_text);
 	}
 
 	// Address fields must be only upper case letters and digits.

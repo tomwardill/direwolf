@@ -75,8 +75,8 @@
 #include "morse.h"
 #include "dtmf.h"
 #include "xid.h"
-#include "dlq.h"
 #include "server.h"
+#include "kiss_frame.h"
 
 
 /*
@@ -116,41 +116,9 @@ static int g_debug_xmit_packet;		/* print packet in hexadecimal form for debuggi
 // TODO: When this was first written, bits/sec was same as baud.
 // Need to revisit this for PSK modes where they are not the same.
 
-#if 0		// Added during 1.5 beta test
-
-static int BITS_TO_MS (int b, int ch) {
-
-	int bits_per_symbol;
-
-	switch (save_audio_config_p->achan[ch].modem_type) {
-	  case MODEM_QPSK:	bits_per_symbol = 2; break;
-	  case MODEM_8PSK:	bits_per_symbol = 3; break;
-	  case default:		bits_per_symbol = 1; break;
-	}
-
-	return ( (b * 1000) / (xmit_bits_per_sec[(ch)] * bits_per_symbol) );
-}
-
-static int MS_TO_BITS (int ms, int ch) {
-
-	int bits_per_symbol;
-
-	switch (save_audio_config_p->achan[ch].modem_type) {
-	  case MODEM_QPSK:	bits_per_symbol = 2; break;
-	  case MODEM_8PSK:	bits_per_symbol = 3; break;
-	  case default:		bits_per_symbol = 1; break;
-	}
-
-	return ( (ms * xmit_bits_per_sec[(ch)] * bits_per_symbol) / 1000 );  TODO...
-}
-
-#else		// OK for 1200, 9600 but wrong for PSK
-
 #define BITS_TO_MS(b,ch) (((b)*1000)/xmit_bits_per_sec[(ch)])
 
 #define MS_TO_BITS(ms,ch) (((ms)*xmit_bits_per_sec[(ch)])/1000)
-
-#endif
 
 #define MAXX(a,b) (((a)>(b)) ? (a) : (b))
 
@@ -742,6 +710,10 @@ static void xmit_ax25_frames (int chan, int prio, packet_t pp, int max_bundle)
 	double time_ptt;	/* Time when PTT is turned on. */
 	double time_now;	/* Current time. */
 
+        unsigned char ACK[60];          // Should never get more that one outstanding ackmode frame, but to be safe..
+        int acklen = 0;
+        int Client = 0;
+        struct kissport_status_s *kps = malloc(sizeof(struct kissport_status_s));
 
 	int nb;
 
@@ -760,11 +732,6 @@ static void xmit_ax25_frames (int chan, int prio, packet_t pp, int max_bundle)
 #endif
 	ptt_set (OCTYPE_PTT, chan, 1);
 
-// Inform data link state machine that we are now transmitting.
-
-	dlq_seize_confirm (chan);	// C4.2.  "This primitive indicates, to the Data-link State
-					// machine, that the transmission opportunity has arrived."
-
 	pre_flags = MS_TO_BITS(xmit_txdelay[chan] * 10, chan) / 8;
 	num_bits =  layer2_preamble_postamble (chan, pre_flags, 0, save_audio_config_p);
 #if DEBUG
@@ -772,11 +739,6 @@ static void xmit_ax25_frames (int chan, int prio, packet_t pp, int max_bundle)
 	dw_printf ("xmit_thread: t=%.3f, txdelay=%d [*10], pre_flags=%d, num_bits=%d\n", dtime_now()-time_ptt, xmit_txdelay[chan], pre_flags, num_bits);
 	double presleep = dtime_now();
 #endif
-
-	SLEEP_MS (10);			// Give data link state machine a chance to
-					// to stuff more frames into the transmit queue,
-					// in response to dlq_seize_confirm, so
-					// we don't run off the end too soon.
 
 #if DEBUG
 	text_color_set(DW_COLOR_DEBUG);
@@ -801,6 +763,22 @@ static void xmit_ax25_frames (int chan, int prio, packet_t pp, int max_bundle)
 	text_color_set(DW_COLOR_DEBUG);
 	dw_printf ("xmit_thread: t=%.3f, nb=%d, num_bits=%d, numframe=%d\n", dtime_now()-time_ptt, nb, num_bits, numframe);
 #endif
+                if (pp->KISSCMD == 12)          // ACKMODE
+                {
+                        // return an ack
+                        ACK[acklen++] = FEND;
+                        ACK[acklen++] = pp->KISSCMD;
+                        memcpy(&ACK[acklen], &pp->ACK, 2);
+                        acklen += 2;
+                        ACK[acklen++] = FEND;
+ 
+#if DEBUG
+	                text_color_set(DW_COLOR_DEBUG);
+	                dw_printf ("\nxmit_thread: t=%.3f ACKMODE CLIENT %d SOCKET %d CHANNEL %d PORT %d.\n\n",dtime_now()-time_ptt,pp->Client,pp->KPS->client_sock[Client],pp->KPS->chan,pp->KPS->tcp_port);
+#endif
+                        Client = pp->Client;
+			memcpy(kps, pp->KPS, sizeof(struct kissport_status_s));
+                }
 	ax25_delete (pp);
 
 /*
@@ -852,6 +830,16 @@ static void xmit_ax25_frames (int chan, int prio, packet_t pp, int max_bundle)
 	        text_color_set(DW_COLOR_DEBUG);
 	        dw_printf ("xmit_thread: t=%.3f, nb=%d, num_bits=%d, numframe=%d\n", dtime_now()-time_ptt, nb, num_bits, numframe);
 #endif
+                if (pp->KISSCMD == 12)          // ACKMODE
+                {
+                        // return an ack
+ 
+                        ACK[acklen++] = FEND;
+                        ACK[acklen++] = pp->KISSCMD;
+                        memcpy(&ACK[acklen], &pp->ACK, 2);
+                        acklen += 2;
+                        ACK[acklen++] = FEND;
+                }
 	        ax25_delete (pp);
 
 	        break;
@@ -935,6 +923,13 @@ static void xmit_ax25_frames (int chan, int prio, packet_t pp, int max_bundle)
 		
 	ptt_set (OCTYPE_PTT, chan, 0);
 
+        // Send any ackmode acks
+ 
+        if (acklen)
+        {
+                kissnet_raw_send(Client, ACK, acklen, kps);
+        }
+
 } /* end xmit_ax25_frames */
 
 
@@ -969,24 +964,6 @@ static int send_one_frame (int c, int p, packet_t pp)
 
 
 	if (ax25_is_null_frame(pp)) {
-
-	  // Issue 132 - We could end up in a situation where:
-	  // Transmitter is already on.
-	  // Application wants to send a frame.
-	  // dl_seize_request turns into this null frame.
-	  // It was being ignored here so the data got stuck in the queue.
-	  // I think the solution is to send back a seize confirm here.
-	  // It shouldn't hurt if we send it redundantly.
-	  // Added for 1.5 beta test 4.
-
-	  dlq_seize_confirm (c);	// C4.2.  "This primitive indicates, to the Data-link State
-					// machine, that the transmission opportunity has arrived."
-
-	  SLEEP_MS (10);		// Give data link state machine a chance to
-					// to stuff more frames into the transmit queue,
-					// in response to dlq_seize_confirm, so
-					// we don't run off the end too soon.
-
 	  return(0);
 	}
 
